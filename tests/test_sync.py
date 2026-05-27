@@ -87,6 +87,21 @@ def test_last_push_wins(client):
     assert camps["c1"]["name"] == "Second"
 
 
+def test_null_json_fields_accepted(client):
+    # The Rust client serializes an unset players/metadata/speakers as JSON null.
+    push = {
+        "campaigns": [{"campaign_id": "c1", "name": "C", "players": None, "updated_at": "t"}],
+        "sessions": [{"session_id": "s1", "metadata": None, "speakers": None, "updated_at": "t"}],
+    }
+    r = _sync(client, "A", push=push)
+    assert r["synced_at"] is not None
+    b = _sync(client, "B", since=None, push={})
+    camp = next(c for c in b["pull"]["campaigns"] if c["campaign_id"] == "c1")
+    assert camp["players"] == []
+    sess = next(s for s in b["pull"]["sessions"] if s["session_id"] == "s1")
+    assert sess["metadata"] == {} and sess["speakers"] == []
+
+
 def test_artifact_deletion_propagates(client):
     art = {
         "artifact_id": "a1", "session_id": "s1", "kind": "summary",

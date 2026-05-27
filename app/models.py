@@ -8,7 +8,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+def _none_to_list(v: Any) -> Any:
+    return [] if v is None else v
+
+
+def _none_to_dict(v: Any) -> Any:
+    return {} if v is None else v
 
 
 class Campaign(BaseModel):
@@ -24,6 +32,9 @@ class Campaign(BaseModel):
     updated_at: str = ""
     deleted: bool = False
 
+    # The Rust client may serialize an unset JSON value as null; treat as empty.
+    _players_none = field_validator("players", mode="before")(_none_to_list)
+
 
 class Session(BaseModel):
     session_id: str
@@ -36,6 +47,9 @@ class Session(BaseModel):
     speakers: list[Any] = Field(default_factory=list)
     updated_at: str = ""
     deleted: bool = False
+
+    _metadata_none = field_validator("metadata", mode="before")(_none_to_dict)
+    _speakers_none = field_validator("speakers", mode="before")(_none_to_list)
 
 
 class Artifact(BaseModel):
