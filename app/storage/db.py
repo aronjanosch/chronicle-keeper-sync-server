@@ -1,11 +1,20 @@
-"""SQLite database helpers for the CK sync server.
+"""SQLite database for the CK sync server.
 
-Schema differences vs. the standalone app's DB:
-- ``artifacts.content TEXT`` stores text directly (no ``file_path``).
-- ``sessions.speakers_json`` stores speaker labels in the sessions table.
-- No ``provider_keys`` table (LLM keys stay client-side, never sent here).
+The server is a dumb authoritative mirror for `POST /sync`:
 
-Future: swap ``get_connection`` for an async Postgres driver when scale demands it.
+- Every accepted record carries a monotonic ``server_seq`` (allocated from a
+  single counter). The sync cursor (`since`/`synced_at`) is that integer,
+  serialised as a string — opaque to the client. This makes the pull cursor
+  immune to client clock skew (see ``docs/SYNC_PROTOCOL.md``).
+- Referential integrity is the client's job; we deliberately omit foreign keys
+  so an out-of-order push can never abort a sync.
+- Artifact content is stored inline (no file paths). ``artifact_id`` is the
+  client-generated UUID and is unique (push-once / immutable).
+- Hard-deleted artifacts leave a tombstone in ``deleted_artifacts`` so the
+  deletion propagates to other devices. Campaigns/sessions use a soft-delete
+  flag instead.
+
+Future: swap ``get_connection`` for async Postgres when scale demands it.
 """
 
 from __future__ import annotations
@@ -14,16 +23,16 @@ import os
 import sqlite3
 from pathlib import Path
 
-
 DEFAULT_DB_FILENAME = "chronicle_keeper_sync.db"
 
 SCHEMA_STATEMENTS = [
     """
-    CREATE TABLE IF NOT EXISTS config (
-        key   TEXT PRIMARY KEY,
-        value TEXT NOT NULL
+    CREATE TABLE IF NOT EXISTS sync_counter (
+        id  INTEGER PRIMARY KEY CHECK (id = 0),
+        seq INTEGER NOT NULL
     )
     """,
+    "INSERT OR IGNORE INTO sync_counter (id, seq) VALUES (0, 0)",
     """
     CREATE TABLE IF NOT EXISTS campaigns (
         campaign_id          TEXT PRIMARY KEY,
@@ -34,9 +43,13 @@ SCHEMA_STATEMENTS = [
         setting              TEXT,
         default_language     TEXT,
         players_json         TEXT NOT NULL DEFAULT '[]',
-        extra_info           TEXT
+        extra_info           TEXT,
+        updated_at           TEXT NOT NULL DEFAULT '',
+        deleted              INTEGER NOT NULL DEFAULT 0,
+        server_seq           INTEGER NOT NULL DEFAULT 0
     )
     """,
+    "CREATE INDEX IF NOT EXISTS idx_campaigns_seq ON campaigns(server_seq)",
     """
     CREATE TABLE IF NOT EXISTS sessions (
         session_id      TEXT PRIMARY KEY,
@@ -47,30 +60,32 @@ SCHEMA_STATEMENTS = [
         metadata_json   TEXT NOT NULL DEFAULT '{}',
         notes           TEXT,
         speakers_json   TEXT NOT NULL DEFAULT '[]',
-        FOREIGN KEY (campaign_id) REFERENCES campaigns(campaign_id)
+        updated_at      TEXT NOT NULL DEFAULT '',
+        deleted         INTEGER NOT NULL DEFAULT 0,
+        server_seq      INTEGER NOT NULL DEFAULT 0
     )
     """,
-    """
-    CREATE INDEX IF NOT EXISTS idx_sessions_campaign_id
-    ON sessions(campaign_id)
-    """,
-    # content stored inline — no file_path dependency
+    "CREATE INDEX IF NOT EXISTS idx_sessions_seq ON sessions(server_seq)",
     """
     CREATE TABLE IF NOT EXISTS artifacts (
-        id          INTEGER PRIMARY KEY AUTOINCREMENT,
-        session_id  TEXT NOT NULL,
-        kind        TEXT NOT NULL,
-        provider    TEXT NOT NULL,
-        model       TEXT NOT NULL,
-        content     TEXT NOT NULL DEFAULT '',
-        created_at  TEXT NOT NULL,
-        FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+        artifact_id  TEXT PRIMARY KEY,
+        session_id   TEXT NOT NULL,
+        kind         TEXT NOT NULL,
+        provider     TEXT NOT NULL,
+        model        TEXT NOT NULL,
+        content      TEXT NOT NULL DEFAULT '',
+        created_at   TEXT NOT NULL,
+        server_seq   INTEGER NOT NULL DEFAULT 0
     )
     """,
+    "CREATE INDEX IF NOT EXISTS idx_artifacts_seq ON artifacts(server_seq)",
     """
-    CREATE INDEX IF NOT EXISTS idx_artifacts_session
-    ON artifacts(session_id, kind)
+    CREATE TABLE IF NOT EXISTS deleted_artifacts (
+        artifact_id TEXT PRIMARY KEY,
+        server_seq  INTEGER NOT NULL
+    )
     """,
+    "CREATE INDEX IF NOT EXISTS idx_deleted_artifacts_seq ON deleted_artifacts(server_seq)",
 ]
 
 
@@ -85,7 +100,6 @@ def get_connection() -> sqlite3.Connection:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
     _ensure_schema(conn)
     return conn
@@ -95,3 +109,16 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     for stmt in SCHEMA_STATEMENTS:
         conn.execute(stmt)
     conn.commit()
+
+
+def next_seq(conn: sqlite3.Connection) -> int:
+    """Allocate and return the next monotonic server sequence number."""
+    conn.execute("UPDATE sync_counter SET seq = seq + 1 WHERE id = 0")
+    row = conn.execute("SELECT seq FROM sync_counter WHERE id = 0").fetchone()
+    return int(row["seq"])
+
+
+def current_seq(conn: sqlite3.Connection) -> int:
+    """Current high-water sequence number (returned to the client as `synced_at`)."""
+    row = conn.execute("SELECT seq FROM sync_counter WHERE id = 0").fetchone()
+    return int(row["seq"]) if row else 0

@@ -9,14 +9,14 @@ The sync protocol is publicly documented in the app repo at [`docs/SYNC_PROTOCOL
 
 The official hosted sync backend for [Chronicle Keeper](https://github.com/aronjanosch/chronicle-keeper).
 
-- Data CRUD + auth only — no transcription, no LLM, no file processing.
+- Data mirror + auth only — no transcription, no LLM, no file processing.
 - Transcription and summarization always run on the client device.
-- One endpoint does all the work: `POST /sync`.
+- One endpoint does all the work: `POST /sync` (plus public `GET /health`).
 
 ## Status
 
-> ⚠️ **Current code uses CRUD endpoints (15+ routes) — needs rebuild.**  
-> Target: `GET /health` + `POST /sync` only. See protocol spec link above.
+> ✅ **Rebuilt around `POST /sync`** (replaces the old CRUD routes). Offline-first
+> batch sync with server-authoritative merge. Round-trip tests in `tests/`.
 
 ---
 
@@ -35,7 +35,10 @@ chronicle-keeper-sync-server (this)
 SQLite (WAL mode) on VPS
 ```
 
-Conflict resolution: last `updated_at` wins for campaigns/sessions. Artifacts immutable.
+Conflict resolution: **server-authoritative, last push received wins.** Each accepted
+record gets a monotonic `server_seq` (the sync cursor, opaque to the client). Artifacts
+are immutable (push-once by `artifact_id`); deletions propagate via tombstones. Clock-skew
+immune — client timestamps are never used for conflicts. See the protocol spec.
 
 ---
 
@@ -84,10 +87,10 @@ Put Caddy in front for TLS. Back up `/data/chronicle_keeper_sync.db`.
 
 ## Roadmap
 
-- [ ] Rebuild around `POST /sync` (replace current CRUD endpoints)
-- [ ] Add `updated_at` to campaigns + sessions schema
-- [ ] Add `artifact_id` (client UUID) to artifacts
-- [ ] Add `deleted_records` table for delete propagation
+- [x] Rebuild around `POST /sync` (replaced the CRUD endpoints)
+- [x] `server_seq` cursor + `updated_at`/`deleted` on campaigns + sessions
+- [x] `artifact_id` (client UUID) primary key on artifacts; push-once
+- [x] `deleted_artifacts` tombstone table for delete propagation
 - [ ] Stripe webhook for subscription validation
-- [ ] Per-user auth (replace shared token with user accounts)
+- [ ] Per-user auth (replace shared token with user accounts / Stripe customer ids)
 - [ ] Postgres option for larger deployments
