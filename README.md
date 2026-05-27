@@ -1,7 +1,8 @@
 # chronicle-keeper-sync-server
 
-**Proprietary.** This repository is not open source.  
-The sync protocol is publicly documented in the app repo at [`docs/SYNC_PROTOCOL.md`](https://github.com/aronjanosch/chronicle-keeper/blob/native-rust-core/docs/SYNC_PROTOCOL.md).
+**Open source ([AGPL-3.0](LICENSE)).** Self-hosting is welcome and expected — the official
+hosted instance is the paid offering, but you can run your own. The sync protocol is documented
+in the app repo at [`docs/SYNC_PROTOCOL.md`](https://github.com/aronjanosch/chronicle-keeper/blob/main/docs/SYNC_PROTOCOL.md).
 
 ---
 
@@ -94,3 +95,10 @@ Put Caddy in front for TLS. Back up `/data/chronicle_keeper_sync.db`.
 - [ ] Stripe webhook for subscription validation
 - [ ] Per-user auth (replace shared token with user accounts / Stripe customer ids)
 - [ ] Postgres option for larger deployments
+
+---
+
+## License
+
+[AGPL-3.0](LICENSE). Run it, modify it, self-host it. If you offer it as a network service,
+the AGPL requires you to publish your source. The Chronicle Keeper app itself is MIT.

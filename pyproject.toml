@@ -3,6 +3,7 @@ name = "ck-sync-server"
 version = "0.2.0"
 description = "Chronicle Keeper sync server — offline-first multi-device sync (POST /sync)"
 readme = "README.md"
+license = "AGPL-3.0-or-later"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.119.0",
