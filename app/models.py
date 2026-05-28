@@ -29,6 +29,7 @@ class Campaign(BaseModel):
     default_language: str = ""
     players: list[Any] = Field(default_factory=list)
     extra_info: str = ""
+    codex: str = ""
     updated_at: str = ""
     deleted: bool = False
 
@@ -62,11 +63,23 @@ class Artifact(BaseModel):
     created_at: str = ""
 
 
+class CodexEntry(BaseModel):
+    entry_id: str
+    campaign_id: str
+    name: str
+    kind: str
+    body: str = ""
+    source: str = "manual"
+    updated_at: str = ""
+    deleted: bool = False
+
+
 class SyncPayload(BaseModel):
     campaigns: list[Campaign] = Field(default_factory=list)
     sessions: list[Session] = Field(default_factory=list)
     artifacts: list[Artifact] = Field(default_factory=list)
     deleted_artifact_ids: list[str] = Field(default_factory=list)
+    codex_entries: list[CodexEntry] = Field(default_factory=list)
 
 
 class SyncRequest(BaseModel):

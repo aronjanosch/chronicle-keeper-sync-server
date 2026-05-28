@@ -36,7 +36,7 @@ def test_health(client):
 def test_push_then_other_device_pulls(client):
     # Device A pushes a campaign + session + artifact.
     push = {
-        "campaigns": [{"campaign_id": "c1", "name": "Camp", "updated_at": "t1"}],
+        "campaigns": [{"campaign_id": "c1", "name": "Camp", "codex": "Neverwinter — frozen city.", "updated_at": "t1"}],
         "sessions": [{"session_id": "s1", "campaign_id": "c1", "updated_at": "t1"}],
         "artifacts": [{
             "artifact_id": "a1", "session_id": "s1", "kind": "summary",
@@ -52,6 +52,7 @@ def test_push_then_other_device_pulls(client):
     # Device B (fresh cursor) pulls everything A pushed.
     b = _sync(client, "deviceB", since=None, push={})
     assert {c["campaign_id"] for c in b["pull"]["campaigns"]} == {"c1"}
+    assert b["pull"]["campaigns"][0]["codex"] == "Neverwinter — frozen city."
     assert {s["session_id"] for s in b["pull"]["sessions"]} == {"s1"}
     arts = b["pull"]["artifacts"]
     assert len(arts) == 1 and arts[0]["content"] == "notes"
@@ -100,6 +101,29 @@ def test_null_json_fields_accepted(client):
     assert camp["players"] == []
     sess = next(s for s in b["pull"]["sessions"] if s["session_id"] == "s1")
     assert sess["metadata"] == {} and sess["speakers"] == []
+
+
+def test_codex_entries_round_trip(client):
+    entry = {
+        "entry_id": "e1",
+        "campaign_id": "c1",
+        "name": "Aragorn",
+        "kind": "npc",
+        "body": "Ranger",
+        "source": "manual",
+        "updated_at": "t1",
+        "deleted": False,
+    }
+    _sync(client, "A", push={"codex_entries": [entry]})
+    b = _sync(client, "B", since=None, push={})
+    pulled = b["pull"]["codex_entries"]
+    assert len(pulled) == 1 and pulled[0]["body"] == "Ranger"
+
+    # Soft-delete propagates as a row with deleted=true.
+    _sync(client, "A", push={"codex_entries": [{**entry, "deleted": True, "updated_at": "t2"}]})
+    c = _sync(client, "C", since=None, push={})
+    cdx = c["pull"]["codex_entries"]
+    assert len(cdx) == 1 and cdx[0]["deleted"] is True
 
 
 def test_artifact_deletion_propagates(client):

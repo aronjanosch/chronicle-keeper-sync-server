@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import sqlite3
 
-from app.models import Artifact, Campaign, Session, SyncPayload, SyncRequest, SyncResponse
+from app.models import Artifact, Campaign, CodexEntry, Session, SyncPayload, SyncRequest, SyncResponse
 from app.storage.db import current_seq, next_seq
 
 
@@ -39,11 +39,13 @@ def merge(conn: sqlite3.Connection, req: SyncRequest) -> SyncResponse:
     pushed_session_ids = {s.session_id for s in push.sessions}
     pushed_artifact_ids = {a.artifact_id for a in push.artifacts}
     pushed_deleted_ids = set(push.deleted_artifact_ids)
+    pushed_codex_ids = {e.entry_id for e in push.codex_entries}
 
     _apply_campaigns(conn, push.campaigns)
     _apply_sessions(conn, push.sessions)
     _apply_artifacts(conn, push.artifacts)
     _apply_artifact_deletions(conn, push.deleted_artifact_ids)
+    _apply_codex_entries(conn, push.codex_entries)
     conn.commit()
 
     pull = SyncPayload(
@@ -51,6 +53,7 @@ def merge(conn: sqlite3.Connection, req: SyncRequest) -> SyncResponse:
         sessions=_pull_sessions(conn, since, pushed_session_ids),
         artifacts=_pull_artifacts(conn, since, pushed_artifact_ids),
         deleted_artifact_ids=_pull_deleted_artifacts(conn, since, pushed_deleted_ids),
+        codex_entries=_pull_codex_entries(conn, since, pushed_codex_ids),
     )
     return SyncResponse(synced_at=str(current_seq(conn)), pull=pull)
 
@@ -65,20 +68,21 @@ def _apply_campaigns(conn: sqlite3.Connection, campaigns: list[Campaign]) -> Non
             """
             INSERT INTO campaigns
               (campaign_id, name, next_session_number, system, gm, setting,
-               default_language, players_json, extra_info, updated_at, deleted, server_seq)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               default_language, players_json, extra_info, codex, updated_at, deleted, server_seq)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(campaign_id) DO UPDATE SET
               name = excluded.name,
               next_session_number = excluded.next_session_number,
               system = excluded.system, gm = excluded.gm, setting = excluded.setting,
               default_language = excluded.default_language,
               players_json = excluded.players_json, extra_info = excluded.extra_info,
+              codex = excluded.codex,
               updated_at = excluded.updated_at, deleted = excluded.deleted,
               server_seq = excluded.server_seq
             """,
             (
                 c.campaign_id, c.name, c.next_session_number, c.system, c.gm, c.setting,
-                c.default_language, json.dumps(c.players), c.extra_info, c.updated_at,
+                c.default_language, json.dumps(c.players), c.extra_info, c.codex, c.updated_at,
                 int(c.deleted), seq,
             ),
         )
@@ -135,6 +139,27 @@ def _apply_artifact_deletions(conn: sqlite3.Connection, ids: list[str]) -> None:
         )
 
 
+def _apply_codex_entries(conn: sqlite3.Connection, entries: list[CodexEntry]) -> None:
+    for e in entries:
+        seq = next_seq(conn)
+        conn.execute(
+            """
+            INSERT INTO codex_entries
+              (entry_id, campaign_id, name, kind, body, source, updated_at, deleted, server_seq)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(entry_id) DO UPDATE SET
+              campaign_id = excluded.campaign_id, name = excluded.name, kind = excluded.kind,
+              body = excluded.body, source = excluded.source,
+              updated_at = excluded.updated_at, deleted = excluded.deleted,
+              server_seq = excluded.server_seq
+            """,
+            (
+                e.entry_id, e.campaign_id, e.name, e.kind, e.body, e.source or "manual",
+                e.updated_at, int(e.deleted), seq,
+            ),
+        )
+
+
 # ── pull (server -> client) ─────────────────────────────────────────────────
 
 
@@ -162,6 +187,7 @@ def _pull_campaigns(conn: sqlite3.Connection, since: int, exclude: set[str]) -> 
             default_language=r["default_language"] or "",
             players=json.loads(r["players_json"] or "[]"),
             extra_info=r["extra_info"] or "",
+            codex=r["codex"] or "",
             updated_at=r["updated_at"] or "",
             deleted=bool(r["deleted"]),
         )
@@ -216,3 +242,23 @@ def _pull_deleted_artifacts(conn: sqlite3.Connection, since: int, exclude: set[s
         f"SELECT artifact_id FROM deleted_artifacts WHERE server_seq > ?{clause}", [since, *extra]
     ).fetchall()
     return [r["artifact_id"] for r in rows]
+
+
+def _pull_codex_entries(conn: sqlite3.Connection, since: int, exclude: set[str]) -> list[CodexEntry]:
+    clause, extra = _exclude_clause("entry_id", exclude)
+    rows = conn.execute(
+        f"SELECT * FROM codex_entries WHERE server_seq > ?{clause}", [since, *extra]
+    ).fetchall()
+    return [
+        CodexEntry(
+            entry_id=r["entry_id"],
+            campaign_id=r["campaign_id"],
+            name=r["name"],
+            kind=r["kind"],
+            body=r["body"] or "",
+            source=r["source"] or "manual",
+            updated_at=r["updated_at"] or "",
+            deleted=bool(r["deleted"]),
+        )
+        for r in rows
+    ]

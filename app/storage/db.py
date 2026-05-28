@@ -44,6 +44,7 @@ SCHEMA_STATEMENTS = [
         default_language     TEXT,
         players_json         TEXT NOT NULL DEFAULT '[]',
         extra_info           TEXT,
+        codex                TEXT NOT NULL DEFAULT '',
         updated_at           TEXT NOT NULL DEFAULT '',
         deleted              INTEGER NOT NULL DEFAULT 0,
         server_seq           INTEGER NOT NULL DEFAULT 0
@@ -86,6 +87,28 @@ SCHEMA_STATEMENTS = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_deleted_artifacts_seq ON deleted_artifacts(server_seq)",
+    """
+    CREATE TABLE IF NOT EXISTS codex_entries (
+        entry_id     TEXT PRIMARY KEY,
+        campaign_id  TEXT NOT NULL,
+        name         TEXT NOT NULL,
+        kind         TEXT NOT NULL,
+        body         TEXT NOT NULL DEFAULT '',
+        source       TEXT NOT NULL DEFAULT 'manual',
+        updated_at   TEXT NOT NULL DEFAULT '',
+        deleted      INTEGER NOT NULL DEFAULT 0,
+        server_seq   INTEGER NOT NULL DEFAULT 0
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_codex_entries_seq ON codex_entries(server_seq)",
+    "CREATE INDEX IF NOT EXISTS idx_codex_entries_campaign ON codex_entries(campaign_id)",
+]
+
+# Best-effort ALTERs for already-deployed DBs (the CREATE TABLEs above only apply
+# to fresh installs). SQLite has no ADD COLUMN IF NOT EXISTS, so a "duplicate
+# column" error means it's already there — ignore it; surface anything else.
+MIGRATION_STATEMENTS = [
+    "ALTER TABLE campaigns ADD COLUMN codex TEXT NOT NULL DEFAULT ''",
 ]
 
 
@@ -108,6 +131,12 @@ def get_connection() -> sqlite3.Connection:
 def _ensure_schema(conn: sqlite3.Connection) -> None:
     for stmt in SCHEMA_STATEMENTS:
         conn.execute(stmt)
+    for stmt in MIGRATION_STATEMENTS:
+        try:
+            conn.execute(stmt)
+        except sqlite3.OperationalError as e:
+            if "duplicate column name" not in str(e):
+                raise
     conn.commit()
 
 
