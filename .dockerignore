@@ -1,0 +1,27 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+build/
+.pytest_cache/
+
+# Local data / secrets
+.env
+*.db
+*.db-shm
+*.db-wal
+
+# Tests & docs not needed at runtime
+tests/
+*.md
+!README.md
+
+# Editor
+.DS_Store
+*.swp

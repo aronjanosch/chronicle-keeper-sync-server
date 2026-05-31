@@ -1,0 +1,21 @@
+services:
+  sync-server:
+    # Pull the published image, or build locally with `docker compose build`.
+    image: ghcr.io/aronjanosch/chronicle-keeper-sync-server:latest
+    build: .
+    container_name: ck-sync-server
+    restart: unless-stopped
+    ports:
+      - "${CK_PORT:-8080}:8080"
+    environment:
+      CK_SYNC_TOKEN: ${CK_SYNC_TOKEN:-}
+      CK_DB_PATH: /data/chronicle_keeper_sync.db
+      CK_HOST: 0.0.0.0
+      CK_PORT: 8080
+      CK_CORS_ORIGINS: ${CK_CORS_ORIGINS:-*}
+      CHRONICLE_DEBUG: ${CHRONICLE_DEBUG:-0}
+    volumes:
+      - ck-data:/data
+
+volumes:
+  ck-data:
