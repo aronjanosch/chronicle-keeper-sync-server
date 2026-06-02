@@ -5,7 +5,7 @@ The server is a dumb authoritative mirror for `POST /sync`:
 - Every accepted record carries a monotonic ``server_seq`` (allocated from a
   single counter). The sync cursor (`since`/`synced_at`) is that integer,
   serialised as a string — opaque to the client. This makes the pull cursor
-  immune to client clock skew (see ``docs/SYNC_PROTOCOL.md``).
+  immune to client clock skew (see the merge logic in ``app/sync.py``).
 - Referential integrity is the client's job; we deliberately omit foreign keys
   so an out-of-order push can never abort a sync.
 - Artifact content is stored inline (no file paths). ``artifact_id`` is the

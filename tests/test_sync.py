@@ -16,10 +16,11 @@ def client(tmp_path, monkeypatch):
     return TestClient(app)
 
 
-def _sync(client, client_id, since=None, push=None):
+def _sync(client, client_id, since=None, push=None, mode="merge"):
     body = {
         "client_id": client_id,
         "since": since,
+        "mode": mode,
         "push": push or {},
     }
     resp = client.post("/sync", json=body)
@@ -155,6 +156,77 @@ def test_campaign_recap_and_codex_notes_round_trip(client):
 
     entry = next(e for e in b["pull"]["codex_entries"] if e["entry_id"] == "e1")
     assert entry["detail"] == "A weathered ranger of the North."
+
+
+def _artifact(aid, sid, content):
+    return {
+        "artifact_id": aid, "session_id": sid, "kind": "summary",
+        "provider": "p", "model": "m", "content": content, "created_at": "t1",
+    }
+
+
+def test_mirror_prunes_records_absent_from_push(client):
+    # Seed the server with two of everything via a normal merge push.
+    _sync(client, "A", since=None, push={
+        "campaigns": [
+            {"campaign_id": "c1", "name": "Keep", "updated_at": "t1"},
+            {"campaign_id": "c2", "name": "Drop", "updated_at": "t1"},
+        ],
+        "sessions": [
+            {"session_id": "s1", "campaign_id": "c1", "updated_at": "t1"},
+            {"session_id": "s2", "campaign_id": "c2", "updated_at": "t1"},
+        ],
+        "artifacts": [_artifact("a1", "s1", "x"), _artifact("a2", "s2", "y")],
+        "codex_entries": [
+            {"entry_id": "e1", "campaign_id": "c1", "name": "Keep", "kind": "npc", "updated_at": "t1"},
+            {"entry_id": "e2", "campaign_id": "c2", "name": "Drop", "kind": "npc", "updated_at": "t1"},
+        ],
+    })
+
+    # Device A mirrors: only the "c1" side of everything still exists locally.
+    _sync(client, "A", since=None, mode="mirror", push={
+        "campaigns": [{"campaign_id": "c1", "name": "Keep", "updated_at": "t2"}],
+        "sessions": [{"session_id": "s1", "campaign_id": "c1", "updated_at": "t2"}],
+        "artifacts": [_artifact("a1", "s1", "x")],
+        "codex_entries": [{"entry_id": "e1", "campaign_id": "c1", "name": "Keep", "kind": "npc", "updated_at": "t2"}],
+    })
+
+    # A fresh device sees the c1 side live and the c2 side deleted/tombstoned.
+    b = _sync(client, "B", since=None, push={})
+    camps = {c["campaign_id"]: c for c in b["pull"]["campaigns"]}
+    assert camps["c1"]["deleted"] is False
+    assert camps["c2"]["deleted"] is True
+    sess = {s["session_id"]: s for s in b["pull"]["sessions"]}
+    assert sess["s2"]["deleted"] is True
+    cdx = {e["entry_id"]: e for e in b["pull"]["codex_entries"]}
+    assert cdx["e2"]["deleted"] is True
+    assert {a["artifact_id"] for a in b["pull"]["artifacts"]} == {"a1"}
+    assert "a2" in b["pull"]["deleted_artifact_ids"]
+
+
+def test_mirror_does_not_echo_its_own_prunes(client):
+    # The mirroring device must not pull back the deletions it just caused.
+    _sync(client, "A", since=None, push={"campaigns": [
+        {"campaign_id": "c1", "name": "x", "updated_at": "t1"},
+        {"campaign_id": "c2", "name": "y", "updated_at": "t1"},
+    ]})
+    head = _sync(client, "A", since=None, push={})  # advance A's cursor to the head
+
+    r = _sync(client, "A", since=head["synced_at"], mode="mirror", push={
+        "campaigns": [{"campaign_id": "c1", "name": "x", "updated_at": "t2"}],
+    })
+    assert all(c["campaign_id"] != "c2" for c in r["pull"]["campaigns"])
+
+
+def test_mirror_keeps_existing_immutable_artifact(client):
+    # An artifact present in both the server and the mirror push is kept as-is
+    # (push-once), not pruned.
+    _sync(client, "A", since=None, push={"artifacts": [_artifact("a1", "s1", "orig")]})
+    _sync(client, "A", since=None, mode="mirror", push={"artifacts": [_artifact("a1", "s1", "ignored")]})
+    b = _sync(client, "B", since=None, push={})
+    arts = b["pull"]["artifacts"]
+    assert len(arts) == 1 and arts[0]["content"] == "orig"
+    assert b["pull"]["deleted_artifact_ids"] == []
 
 
 def test_artifact_deletion_propagates(client):

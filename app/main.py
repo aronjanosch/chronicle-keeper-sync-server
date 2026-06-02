@@ -5,8 +5,8 @@ Two endpoints only:
   - POST /sync    (bearer token)   — offline-first batch sync
 
 Transcription, summarization, LLM keys, and file processing all stay on the
-client device. This server is a dumb authoritative data mirror. See the
-published protocol at docs/SYNC_PROTOCOL.md (in the app repo).
+client device. This server is a dumb authoritative data mirror — the wire
+protocol is defined by ``app/models.py`` (shapes) and ``app/sync.py`` (merge).
 """
 
 from __future__ import annotations
@@ -68,9 +68,9 @@ def sync(request: SyncRequest) -> SyncResponse:
     finally:
         conn.close()
     log.info(
-        "sync client=%s since=%s pushed(c=%d s=%d a=%d del=%d) -> synced_at=%s "
+        "sync client=%s mode=%s since=%s pushed(c=%d s=%d a=%d del=%d) -> synced_at=%s "
         "pulled(c=%d s=%d a=%d del=%d)",
-        request.client_id, request.since,
+        request.client_id, request.mode, request.since,
         len(request.push.campaigns), len(request.push.sessions),
         len(request.push.artifacts), len(request.push.deleted_artifact_ids),
         result.synced_at,

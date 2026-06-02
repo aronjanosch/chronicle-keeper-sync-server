@@ -1,6 +1,8 @@
 """`POST /sync` merge logic.
 
-Server-authoritative, last-push-received-wins (see docs/SYNC_PROTOCOL.md):
+Server-authoritative, last-push-received-wins. This module is the authoritative
+description of the merge protocol; the client side is `crates/ck-core/src/sync.rs`
+in the app repo.
 
 1. Apply the client's push. Each accepted campaign/session/artifact is stamped
    with a fresh monotonic ``server_seq``. Campaigns/sessions are upserted
@@ -17,6 +19,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from dataclasses import dataclass, field
 
 from app.models import Artifact, Campaign, CodexEntry, Session, SyncPayload, SyncRequest, SyncResponse
 from app.storage.db import current_seq, next_seq
@@ -41,6 +44,14 @@ def merge(conn: sqlite3.Connection, req: SyncRequest) -> SyncResponse:
     pushed_deleted_ids = set(push.deleted_artifact_ids)
     pushed_codex_ids = {e.entry_id for e in push.codex_entries}
 
+    # "mirror": prune what the push omits before applying it (same transaction).
+    pruned = (
+        _mirror_prune(conn, pushed_campaign_ids, pushed_session_ids,
+                      pushed_artifact_ids, pushed_codex_ids)
+        if req.mode == "mirror"
+        else _Pruned()
+    )
+
     _apply_campaigns(conn, push.campaigns)
     _apply_sessions(conn, push.sessions)
     _apply_artifacts(conn, push.artifacts)
@@ -48,14 +59,87 @@ def merge(conn: sqlite3.Connection, req: SyncRequest) -> SyncResponse:
     _apply_codex_entries(conn, push.codex_entries)
     conn.commit()
 
+    # Exclude what the client pushed and what it just pruned (no echo-back).
     pull = SyncPayload(
-        campaigns=_pull_campaigns(conn, since, pushed_campaign_ids),
-        sessions=_pull_sessions(conn, since, pushed_session_ids),
+        campaigns=_pull_campaigns(conn, since, pushed_campaign_ids | pruned.campaigns),
+        sessions=_pull_sessions(conn, since, pushed_session_ids | pruned.sessions),
         artifacts=_pull_artifacts(conn, since, pushed_artifact_ids),
-        deleted_artifact_ids=_pull_deleted_artifacts(conn, since, pushed_deleted_ids),
-        codex_entries=_pull_codex_entries(conn, since, pushed_codex_ids),
+        deleted_artifact_ids=_pull_deleted_artifacts(conn, since, pushed_deleted_ids | pruned.artifacts),
+        codex_entries=_pull_codex_entries(conn, since, pushed_codex_ids | pruned.codex),
     )
     return SyncResponse(synced_at=str(current_seq(conn)), pull=pull)
+
+
+# ── mirror: prune records the push omits ────────────────────────────────────
+
+
+@dataclass
+class _Pruned:
+    """Ids the mirror prune just deleted, so the pull can exclude them."""
+
+    campaigns: set[str] = field(default_factory=set)
+    sessions: set[str] = field(default_factory=set)
+    artifacts: set[str] = field(default_factory=set)
+    codex: set[str] = field(default_factory=set)
+
+
+def _mirror_prune(
+    conn: sqlite3.Connection,
+    keep_campaigns: set[str],
+    keep_sessions: set[str],
+    keep_artifacts: set[str],
+    keep_codex: set[str],
+) -> _Pruned:
+    """Delete every server row whose id is absent from the push.
+
+    Soft-delete for campaigns/sessions/codex, tombstone for artifacts; each bumps
+    ``server_seq`` so the deletion propagates. Diffed in Python to dodge SQLite's
+    bound-parameter limit on large pushes.
+    """
+    pruned = _Pruned()
+
+    for r in conn.execute("SELECT campaign_id FROM campaigns WHERE deleted = 0").fetchall():
+        cid = r["campaign_id"]
+        if cid not in keep_campaigns:
+            conn.execute(
+                "UPDATE campaigns SET deleted = 1, server_seq = ? WHERE campaign_id = ?",
+                (next_seq(conn), cid),
+            )
+            pruned.campaigns.add(cid)
+
+    for r in conn.execute("SELECT session_id FROM sessions WHERE deleted = 0").fetchall():
+        sid = r["session_id"]
+        if sid not in keep_sessions:
+            conn.execute(
+                "UPDATE sessions SET deleted = 1, server_seq = ? WHERE session_id = ?",
+                (next_seq(conn), sid),
+            )
+            pruned.sessions.add(sid)
+
+    for r in conn.execute("SELECT entry_id FROM codex_entries WHERE deleted = 0").fetchall():
+        eid = r["entry_id"]
+        if eid not in keep_codex:
+            conn.execute(
+                "UPDATE codex_entries SET deleted = 1, server_seq = ? WHERE entry_id = ?",
+                (next_seq(conn), eid),
+            )
+            pruned.codex.add(eid)
+
+    for r in conn.execute("SELECT artifact_id FROM artifacts").fetchall():
+        aid = r["artifact_id"]
+        if aid not in keep_artifacts:
+            seq = next_seq(conn)
+            conn.execute("DELETE FROM artifacts WHERE artifact_id = ?", (aid,))
+            conn.execute(
+                """
+                INSERT INTO deleted_artifacts (artifact_id, server_seq) VALUES (?, ?)
+                ON CONFLICT(artifact_id) DO UPDATE SET server_seq = excluded.server_seq
+                """,
+                (aid, seq),
+            )
+            pruned.artifacts.add(aid)
+
+    return pruned
 
 
 # ── apply (push -> server) ──────────────────────────────────────────────────

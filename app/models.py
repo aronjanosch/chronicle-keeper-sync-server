@@ -1,7 +1,7 @@
 """Pydantic models for the CK sync server — the `POST /sync` wire protocol.
 
-Field names mirror the Rust client's serde DTOs (`crates/ck-core/src/sync.rs`)
-and the published spec in `docs/SYNC_PROTOCOL.md`.
+Field names mirror the Rust client's serde DTOs (`crates/ck-core/src/sync.rs`
+in the app repo). These models are the wire-format reference for the protocol.
 """
 
 from __future__ import annotations
@@ -93,6 +93,8 @@ class SyncPayload(BaseModel):
 class SyncRequest(BaseModel):
     client_id: str
     since: str | None = None
+    # "merge" (default) or "mirror" — see `_mirror_prune` in sync.py.
+    mode: str = "merge"
     push: SyncPayload = Field(default_factory=SyncPayload)
 
 

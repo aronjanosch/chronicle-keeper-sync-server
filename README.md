@@ -1,8 +1,9 @@
 # chronicle-keeper-sync-server
 
 **Open source ([AGPL-3.0](LICENSE)).** Self-hosting is welcome and expected — the official
-hosted instance is the paid offering, but you can run your own. The sync protocol is documented
-in the app repo at [`docs/SYNC_PROTOCOL.md`](https://github.com/aronjanosch/chronicle-keeper/blob/main/docs/SYNC_PROTOCOL.md).
+hosted instance is the paid offering, but you can run your own. This repo *is* the protocol
+reference: the wire format is whatever `app/models.py` accepts and `app/sync.py` does with it
+(the client side lives in the app repo at `crates/ck-core/src/sync.rs`). See **Architecture** below.
 
 ---
 
@@ -39,7 +40,8 @@ SQLite (WAL mode) on VPS
 Conflict resolution: **server-authoritative, last push received wins.** Each accepted
 record gets a monotonic `server_seq` (the sync cursor, opaque to the client). Artifacts
 are immutable (push-once by `artifact_id`); deletions propagate via tombstones. Clock-skew
-immune — client timestamps are never used for conflicts. See the protocol spec.
+immune — client timestamps are never used for conflicts. The merge logic in `app/sync.py` is
+the authoritative description; `mode: "mirror"` makes a push overwrite the server wholesale.
 
 ---
 
