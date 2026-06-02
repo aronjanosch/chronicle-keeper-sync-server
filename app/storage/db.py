@@ -40,11 +40,15 @@ SCHEMA_STATEMENTS = [
         next_session_number  INTEGER NOT NULL DEFAULT 1,
         system               TEXT,
         gm                   TEXT,
+        gm_pronouns          TEXT NOT NULL DEFAULT '',
         setting              TEXT,
         default_language     TEXT,
         players_json         TEXT NOT NULL DEFAULT '[]',
         extra_info           TEXT,
         codex                TEXT NOT NULL DEFAULT '',
+        codex_notes          TEXT NOT NULL DEFAULT '',
+        recap                TEXT NOT NULL DEFAULT '',
+        recap_updated_at     TEXT NOT NULL DEFAULT '',
         updated_at           TEXT NOT NULL DEFAULT '',
         deleted              INTEGER NOT NULL DEFAULT 0,
         server_seq           INTEGER NOT NULL DEFAULT 0
@@ -94,6 +98,7 @@ SCHEMA_STATEMENTS = [
         name         TEXT NOT NULL,
         kind         TEXT NOT NULL,
         body         TEXT NOT NULL DEFAULT '',
+        detail       TEXT NOT NULL DEFAULT '',
         source       TEXT NOT NULL DEFAULT 'manual',
         updated_at   TEXT NOT NULL DEFAULT '',
         deleted      INTEGER NOT NULL DEFAULT 0,
@@ -109,6 +114,11 @@ SCHEMA_STATEMENTS = [
 # column" error means it's already there — ignore it; surface anything else.
 MIGRATION_STATEMENTS = [
     "ALTER TABLE campaigns ADD COLUMN codex TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE campaigns ADD COLUMN codex_notes TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE campaigns ADD COLUMN recap TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE campaigns ADD COLUMN recap_updated_at TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE campaigns ADD COLUMN gm_pronouns TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE codex_entries ADD COLUMN detail TEXT NOT NULL DEFAULT ''",
 ]
 
 

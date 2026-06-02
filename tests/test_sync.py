@@ -126,6 +126,37 @@ def test_codex_entries_round_trip(client):
     assert len(cdx) == 1 and cdx[0]["deleted"] is True
 
 
+def test_campaign_recap_and_codex_notes_round_trip(client):
+    # Recap, codex_notes, and codex_entries.detail must survive the server
+    # round-trip (regression: these were silently dropped before the columns
+    # existed, clobbering the client's local copy on the next pull).
+    push = {
+        "campaigns": [{
+            "campaign_id": "c1",
+            "name": "Camp",
+            "codex_notes": '[{"title":"Bree","body":"A village."}]',
+            "recap": "The party rose from nothing.",
+            "recap_updated_at": "2026-05-29T00:00:00Z",
+            "updated_at": "t1",
+        }],
+        "codex_entries": [{
+            "entry_id": "e1", "campaign_id": "c1", "name": "Aragorn", "kind": "npc",
+            "body": "Ranger", "detail": "A weathered ranger of the North.",
+            "source": "manual", "updated_at": "t1",
+        }],
+    }
+    _sync(client, "A", push=push)
+    b = _sync(client, "B", since=None, push={})
+
+    camp = next(c for c in b["pull"]["campaigns"] if c["campaign_id"] == "c1")
+    assert camp["recap"] == "The party rose from nothing."
+    assert camp["recap_updated_at"] == "2026-05-29T00:00:00Z"
+    assert camp["codex_notes"] == '[{"title":"Bree","body":"A village."}]'
+
+    entry = next(e for e in b["pull"]["codex_entries"] if e["entry_id"] == "e1")
+    assert entry["detail"] == "A weathered ranger of the North."
+
+
 def test_artifact_deletion_propagates(client):
     art = {
         "artifact_id": "a1", "session_id": "s1", "kind": "summary",

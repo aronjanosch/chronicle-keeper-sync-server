@@ -67,22 +67,26 @@ def _apply_campaigns(conn: sqlite3.Connection, campaigns: list[Campaign]) -> Non
         conn.execute(
             """
             INSERT INTO campaigns
-              (campaign_id, name, next_session_number, system, gm, setting,
-               default_language, players_json, extra_info, codex, updated_at, deleted, server_seq)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              (campaign_id, name, next_session_number, system, gm, gm_pronouns, setting,
+               default_language, players_json, extra_info, codex, codex_notes,
+               recap, recap_updated_at, updated_at, deleted, server_seq)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(campaign_id) DO UPDATE SET
               name = excluded.name,
               next_session_number = excluded.next_session_number,
-              system = excluded.system, gm = excluded.gm, setting = excluded.setting,
+              system = excluded.system, gm = excluded.gm,
+              gm_pronouns = excluded.gm_pronouns, setting = excluded.setting,
               default_language = excluded.default_language,
               players_json = excluded.players_json, extra_info = excluded.extra_info,
-              codex = excluded.codex,
+              codex = excluded.codex, codex_notes = excluded.codex_notes,
+              recap = excluded.recap, recap_updated_at = excluded.recap_updated_at,
               updated_at = excluded.updated_at, deleted = excluded.deleted,
               server_seq = excluded.server_seq
             """,
             (
-                c.campaign_id, c.name, c.next_session_number, c.system, c.gm, c.setting,
-                c.default_language, json.dumps(c.players), c.extra_info, c.codex, c.updated_at,
+                c.campaign_id, c.name, c.next_session_number, c.system, c.gm, c.gm_pronouns, c.setting,
+                c.default_language, json.dumps(c.players), c.extra_info, c.codex, c.codex_notes,
+                c.recap, c.recap_updated_at, c.updated_at,
                 int(c.deleted), seq,
             ),
         )
@@ -145,16 +149,16 @@ def _apply_codex_entries(conn: sqlite3.Connection, entries: list[CodexEntry]) ->
         conn.execute(
             """
             INSERT INTO codex_entries
-              (entry_id, campaign_id, name, kind, body, source, updated_at, deleted, server_seq)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+              (entry_id, campaign_id, name, kind, body, detail, source, updated_at, deleted, server_seq)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(entry_id) DO UPDATE SET
               campaign_id = excluded.campaign_id, name = excluded.name, kind = excluded.kind,
-              body = excluded.body, source = excluded.source,
+              body = excluded.body, detail = excluded.detail, source = excluded.source,
               updated_at = excluded.updated_at, deleted = excluded.deleted,
               server_seq = excluded.server_seq
             """,
             (
-                e.entry_id, e.campaign_id, e.name, e.kind, e.body, e.source or "manual",
+                e.entry_id, e.campaign_id, e.name, e.kind, e.body, e.detail, e.source or "manual",
                 e.updated_at, int(e.deleted), seq,
             ),
         )
@@ -183,11 +187,15 @@ def _pull_campaigns(conn: sqlite3.Connection, since: int, exclude: set[str]) -> 
             next_session_number=r["next_session_number"],
             system=r["system"] or "",
             gm=r["gm"] or "",
+            gm_pronouns=r["gm_pronouns"] or "",
             setting=r["setting"] or "",
             default_language=r["default_language"] or "",
             players=json.loads(r["players_json"] or "[]"),
             extra_info=r["extra_info"] or "",
             codex=r["codex"] or "",
+            codex_notes=r["codex_notes"] or "",
+            recap=r["recap"] or "",
+            recap_updated_at=r["recap_updated_at"] or "",
             updated_at=r["updated_at"] or "",
             deleted=bool(r["deleted"]),
         )
@@ -256,6 +264,7 @@ def _pull_codex_entries(conn: sqlite3.Connection, since: int, exclude: set[str])
             name=r["name"],
             kind=r["kind"],
             body=r["body"] or "",
+            detail=r["detail"] or "",
             source=r["source"] or "manual",
             updated_at=r["updated_at"] or "",
             deleted=bool(r["deleted"]),

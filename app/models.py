@@ -25,11 +25,17 @@ class Campaign(BaseModel):
     next_session_number: int = 1
     system: str = ""
     gm: str = ""
+    gm_pronouns: str = ""
     setting: str = ""
     default_language: str = ""
     players: list[Any] = Field(default_factory=list)
     extra_info: str = ""
     codex: str = ""
+    # JSON-encoded array [{title, body}] of freeform glossary notes (opaque string).
+    codex_notes: str = ""
+    # LLM-generated "story so far" recap (markdown) + when it was last generated.
+    recap: str = ""
+    recap_updated_at: str = ""
     updated_at: str = ""
     deleted: bool = False
 
@@ -69,6 +75,8 @@ class CodexEntry(BaseModel):
     name: str
     kind: str
     body: str = ""
+    # Longer write-up shown in the entry inspector (not fed into summaries).
+    detail: str = ""
     source: str = "manual"
     updated_at: str = ""
     deleted: bool = False
